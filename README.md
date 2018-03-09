@@ -28,7 +28,7 @@ Once your `siteconfig.sh` is correctly configured, you can automate the archival
 process with a cron job.  The following crontab line represents what this may
 look like:
 
-    */15  *   *  *   * PYTOKIO_LMT_USER=lmtuser PYTOKIO_LMT_PASSWORD=lmtpasswd FILE_SYSTEMS="filesystem_snx10001 filesystem_snx10002 filesystem_snx10003 filesystem_snx11001" /home/jane/src/git/pytokio-cray/hourly_crontab_wrapper.sh
+    */15  *   *  *   * PYTOKIO_LMT_USER=lmtuser PYTOKIO_LMT_PASSWORD=lmtpasswd FILE_SYSTEMS="filesystem_snx10001 filesystem_snx10002 filesystem_snx10003 filesystem_snx11001" /home/jane/src/git/tokio-cray/hourly_crontab_wrapper.sh
 
 The `hourly_crontab_wrapper.sh` script (and all its dependencies) are fully
 self-contained and can be run from any working directory.  These scripts are
