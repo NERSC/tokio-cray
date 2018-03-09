@@ -1,0 +1,7 @@
+# output
+*.hdf5
+pylmt.log
+schedule/
+
+# do not track files containing secrets!
+siteconfig.sh
