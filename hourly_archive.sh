@@ -10,7 +10,7 @@ BASE_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))"
 
 source ${BASE_DIR}/siteconfig.sh # Load host-specific parameters
 
-SCHEDULE_DIR=${SCHEDULE_DIR:-$BASE_DIR/schedule}
+SCHEDULE_DIR=${SCHEDULE_DIR:-$BASE_DIR/schedule.lmtdb}
 ARCHIVE_LMTDB=${ARCHIVE_LMTDB:-${PYTOKIO_HOME}/bin/archive_lmtdb.py}
 
 # Intervals that start over MAX_AGE seconds ago are discarded without being run
