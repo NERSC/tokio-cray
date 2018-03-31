@@ -8,7 +8,7 @@
 BASE_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))"
 source ${BASE_DIR}/siteconfig.sh # load host-specific parameters
 
-LOGFILE_BASE="${BASE_DIR}/archve_lmtdb.log"
+LOGFILE_BASE="${BASE_DIR}/archive_lmtdb.log"
 LOGFILE="${LOGFILE_BASE}_${RANDOM}"
 
 ${BASE_DIR}/hourly_archive.sh > $LOGFILE 2>&1
