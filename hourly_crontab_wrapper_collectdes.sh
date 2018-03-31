@@ -8,10 +8,10 @@
 BASE_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))"
 source ${BASE_DIR}/siteconfig.sh # load host-specific parameters
 
-LOGFILE_BASE="${BASE_DIR}/archve_lmtdb.log"
+LOGFILE_BASE="${BASE_DIR}/archive_collectdes.log"
 LOGFILE="${LOGFILE_BASE}_${RANDOM}"
 
-${BASE_DIR}/hourly_archive.sh > $LOGFILE 2>&1
+${BASE_DIR}/hourly_archive_collectdes.sh > $LOGFILE 2>&1
 
 ### In the event of an error, e-mail the administrator the log file
 if [ $? -ne 0 ]; then
