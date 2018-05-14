@@ -20,7 +20,7 @@ do
     echo -e "\n=== Checking $fs_file ===" >> "$LOGFILE"
     hdf5_path="${HDF5_OUTPUT_DIR}/$yesterdate/$fs_file"
     if [ -f "$hdf5_path" ]; then
-        $PYTOKIO_HOME/bin/summarize_h5lmt.py --tibs --bins 24 --summary $hdf5_path >> "$LOGFILE" 2>&1
+        $PYTOKIO_HOME/bin/summarize_h5lmt.py --tibs --bins 4 --summary $hdf5_path >> "$LOGFILE" 2>&1
         ret=$?
         if [ $ret -ne 0 -a "$errors" -eq 0 ]; then
             errors=$ret
