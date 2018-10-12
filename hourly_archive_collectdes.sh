@@ -255,3 +255,5 @@ for host_fs in $FILE_SYSTEMS; do
         done
     fi
 done
+
+echo "[$(date)] Completed archive process"
