@@ -15,7 +15,7 @@ ${BASE_DIR}/hourly_archive.sh > $LOGFILE 2>&1
 
 ### In the event of an error, e-mail the administrator the log file
 if [ $? -ne 0 ]; then
-    mailx -s "$(basename $BASH_SOURCE) generated errors" "$ADMIN_EMAIL" < $LOGFILE
+    mailx -s "$(basename $BASH_SOURCE) generated errors" $ADMIN_EMAIL < $LOGFILE
 fi
 
 ### Append the log file to the global log
