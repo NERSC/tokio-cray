@@ -1,6 +1,6 @@
 #!/bin/bash -l
 ################################################################################
-#  Wrapper to call archive_lmtdb.py and track the history of data that has been
+#  Wrapper to call archive_lmtdb and track the history of data that has been
 #  already successfully archived.
 #
 #  Glenn K. Lockwood, September 2018       Lawrence Berkeley National Laboratory
@@ -11,7 +11,7 @@ BASE_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))"
 source ${BASE_DIR}/siteconfig.sh # Load host-specific parameters
 
 SCHEDULE_DIR=${SCHEDULE_DIR:-$BASE_DIR/schedule.lmtdb}
-ARCHIVE_LMTDB=${ARCHIVE_LMTDB:-${PYTOKIO_HOME}/bin/archive_lmtdb.py}
+ARCHIVE_LMTDB=${ARCHIVE_LMTDB:-${PYTOKIO_HOME}/bin/archive_lmtdb}
 
 # Intervals that start over MAX_AGE seconds ago are discarded without being run
 MAX_AGE=${MAX_AGE:-$((24*3600))} # in seconds
@@ -210,7 +210,7 @@ for host_fs in $FILE_SYSTEMS; do
     else
         ### Try to catch failures due to locking.  The version of flock on
         ### Edison does not support --conflict-exit-code, so we cannot
-        ### differentiate failures of flock from failures of archive_lmtdb.py 
+        ### differentiate failures of flock from failures of archive_lmtdb
         ### Re-checking the flock is the best we can do for now.
         if /usr/bin/flock --nonblock "$SCHEDULE_FILE" /bin/true; then
             ### flock came back clean, so the error was not a lock issue
