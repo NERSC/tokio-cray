@@ -32,9 +32,9 @@ do
 done
 
 if [ $errors -ne 0 ]; then
-   mailx -s "ERRORS: daily lustre summary" $ADMIN_EMAIL < "$LOGFILE"
+   mailx -s "ERRORS: daily lustre summary" $REPORT_EMAIL < "$LOGFILE"
 else
-   mailx -s "daily lustre summary" $ADMIN_EMAIL < "$LOGFILE"
+   mailx -s "daily lustre summary" $REPORT_EMAIL < "$LOGFILE"
 fi
 
 rm -f "$LOGFILE"

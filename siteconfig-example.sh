@@ -4,7 +4,8 @@
 
 BASE_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))"
 
-export ADMIN_EMAIL="admin@mycenter.edu"
+export ADMIN_EMAIL="admin@mycenter.edu" # gets errors
+export REPORT_EMAIL="admin@mycenter.edu" # gets daily reports
 
 # Location of the TOKIO repository--even if pytokio is in PYTHONPATH, you must
 # define this so hourly_archive.sh knows where to find the archive_lmtdb.py
