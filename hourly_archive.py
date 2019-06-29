@@ -10,9 +10,16 @@ import datetime
 
 import tokio
 import tokio.cli.archive_lmtdb
+import tokio.cli.archive_collectdes
 
 SCHEDULE_FILE = "%s.schedulefile"
-ARCHIVE_LMTDB = tokio.cli.archive_lmtdb.main
+ARCHIVERS = {
+    "scratch1": tokio.cli.archive_lmtdb.main,
+    "scratch2": tokio.cli.archive_lmtdb.main,
+    "scratch3": tokio.cli.archive_lmtdb.main,
+    "cscratch": tokio.cli.archive_lmtdb.main,
+    "coribb": tokio.cli.archive_collectdes.main,
+}
 
 VERBOSITY = 1
 
@@ -134,12 +141,16 @@ class PeriodicArchiver(object):
 
         self.vprint("Calling archiver with args: %s" % " ".join(argv))
 
-        ARCHIVE_LMTDB(argv=argv)
+        archive_method = ARCHIVERS.get(fsname)
+        if archive_method:
+            archive_method(argv=argv)
+        else:
+            raise RuntimeError("No archiver defined for %s" % fsname)
 
         return 0
 
     def init_schedule(self, fsname):
-        """Initializes internal schedule state and schedulefile
+        """Initializes internal schedule state and schedule file
 
         Args:
             fsname (str): file system whose config/schedule should be used
@@ -155,8 +166,19 @@ class PeriodicArchiver(object):
         self.attempts = 0
         self.commit_schedule(fsname)
 
+    def get_schedule_file(self, fsname):
+        """Simple way to resolve fsname into a schedule file name
+
+        Args:
+            fsname (str): file system whose schedule file should be returned
+
+        Returns:
+            str: Path to the schedule file for fsname
+        """
+        return self.schedule_file % fsname
+
     def get_schedule(self, fsname):
-        """Reads schedulefile and updates internal schedule state
+        """Reads schedule file and updates internal schedule state
 
         Args:
             fsname (str): file system whose config/schedule should be used
@@ -165,10 +187,10 @@ class PeriodicArchiver(object):
             tuple of datetime.datetime: Start and end times of the next interval
         """
 
-        if not os.path.isfile(self.schedule_file % fsname):
+        if not os.path.isfile(self.get_schedule_file(fsname)):
             self.init_schedule(fsname)
 
-        with open(self.schedule_file % fsname, 'r') as sched_file:
+        with open(self.get_schedule_file(fsname), 'r') as sched_file:
             line = sched_file.readline()
 
         self.sched_start, self.attempts = line.split()[0:2]
@@ -182,7 +204,7 @@ class PeriodicArchiver(object):
         return self.sched_start, self.sched_start + SCHEDULE_STEP
 
     def update_schedule(self, fsname, success):
-        """Updates the schedulefile with either a new starting interval or the
+        """Updates the schedule file with either a new starting interval or the
         same interval but an incremented failure count.
 
         Args:
@@ -211,7 +233,7 @@ class PeriodicArchiver(object):
         Args:
             fsname (str): file system whose config/schedule should be used
         """
-        with open(self.schedule_file % fsname, 'w') as sched_file:
+        with open(self.get_schedule_file(fsname), 'w') as sched_file:
             sched_file.write("%d %d\n" % (tokio.common.to_epoch(self.sched_start), self.attempts))
 
     def archive(self, start, end, fsname):
