@@ -1,10 +1,13 @@
 #!/usr/bin/env python
-"""Executes a TOKIO CLI archiver tool using a stateful schedule"""
+"""Executes a TOKIO CLI archiver tool using a stateful schedule
+"""
 
 import os
 import sys
 import json
 import stat
+import errno
+import fcntl
 import argparse
 import datetime
 
@@ -21,8 +24,6 @@ ARCHIVERS = {
     "coribb": tokio.cli.archive_collectdes.main,
 }
 
-VERBOSITY = 1
-
 # Intervals that start over MAX_AGE seconds ago are discarded without being run
 MAX_AGE = datetime.timedelta(days=1)
 MAX_ATTEMPTS = 5
@@ -30,6 +31,7 @@ SCHEDULE_STEP = datetime.timedelta(hours=1) # archive this much time in one invo
 FILE_INTERVAL = datetime.timedelta(days=1) # domain of each output file
 
 DATE_FMT = "%Y-%m-%dT%H:%M:%S"
+DATE_FMT_PRINT = "YYYY-MM-DDTHH:MM:SS"
 
 DEFAULT_CONFIG = {
     "admin_emails": [
@@ -62,6 +64,16 @@ DEFAULT_CONFIG = {
 class PeriodicArchiver(object):
     """Class that periodically runs an archiver process
 
+    Args:
+        archiver_method (function): main() method for a pytokio archiver CLI
+            package to call to trigger the process of archiving timeseries data
+            into TOKIO Time Series.  Must support --init-start, --init-end, and
+            --output as CLI arguments.
+        config (str): Path to configuration json file to use in conjunction with
+            archiver_method
+        verbose (int): Level of verbosity to use when executing an archival
+            process
+
     Attributes:
         verbosity (int): Level of verbosity when executing
         admin_emails (list of str): Addresses to notify on errors
@@ -73,7 +85,8 @@ class PeriodicArchiver(object):
         schedule_file (str): Path to a file to be used to record the last
             executed interval
     """
-    def __init__(self, config=None, verbose=1):
+    def __init__(self, archiver_method, config=None, verbose=1):
+        self.archiver_method = archiver_method
         self.verbosity = verbose
 
         # site-specific configuration parameters
@@ -90,18 +103,29 @@ class PeriodicArchiver(object):
         self.load_config(config=config)
 
     def vprint(self, msg, level=1):
-        """Print messages based on verbosity level
+        """Prints messages based on verbosity level
+
+        Args:
+            msg (str): Message to print to stdout
+            level (int): Minimum verbosity level required to display msg
         """
         if level >= self.verbosity:
             print(msg)
 
     def verror(self, msg):
-        """Print error messages
+        """Prints error messages
+
+        Args:
+            msg (str): Message to send to stderr
         """
         sys.stderr.write("ERROR: " + msg + "\n")
 
     def load_config(self, config):
         """Loads the site-specific configuration file
+
+        Args:
+            config (str): Path to configuration json file to use in conjunction with
+                self.archiver_method
         """
         if config:
             with open(config, 'r') as configfp:
@@ -115,7 +139,7 @@ class PeriodicArchiver(object):
         self.schedule_file = config_blob.get("schedule_file", SCHEDULE_FILE)
 
     def run_archiver(self, start, end, fsname, output_file):
-        """Launches the archiver process.
+        """Launches the archiver process
 
         Args:
             start (datetime.datetime): Begin retrieving and archiving data
@@ -125,7 +149,6 @@ class PeriodicArchiver(object):
             fsname (str): file system whose config/schedule should be used
             output_file (str): File to which output should be written
         """
-        # TODO: check lock
 
         argv = self.archiver_args.get(fsname, "").split()
         if not os.path.isfile(output_file):
@@ -139,21 +162,39 @@ class PeriodicArchiver(object):
         argv.append(start.strftime("%Y-%m-%dT%H:%M:%S"))
         argv.append(end.strftime("%Y-%m-%dT%H:%M:%S"))
 
-        self.vprint("Calling archiver with args: %s" % " ".join(argv))
+        # ensure that two archivers aren't running at the same time
+        lockf_name = self.get_schedule_file(fsname)
+        lockfp = open(lockf_name, 'r')
+        try:
+            fcntl.flock(lockfp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as err: # Python 3 only
+            if err.errno == errno.EAGAIN:
+                raise type(err)("Instance of archiver already running for %s" % fsname)
+            raise
 
-        archive_method = ARCHIVERS.get(fsname)
-        if archive_method:
-            archive_method(argv=argv)
+        # call the archiver
+        if self.archiver_method:
+            self.vprint("Calling archiver with args: %s" % " ".join(argv))
+            self.archiver_method(argv=argv)
         else:
+            # unlock (though not usually necessary since process is about to die)
+            fcntl.flock(lockfp, fcntl.LOCK_UN)
+            lockfp.close()
             raise RuntimeError("No archiver defined for %s" % fsname)
 
-        return 0
+        # unlock schedulefile
+        fcntl.flock(lockfp, fcntl.LOCK_UN)
+        lockfp.close()
 
     def init_schedule(self, fsname):
         """Initializes internal schedule state and schedule file
 
         Args:
             fsname (str): file system whose config/schedule should be used
+
+        Returns:
+            tuple of datetime.datetime: Start and end times of the interval just
+            initialized
         """
         self.sched_start = datetime.datetime.now() - MAX_AGE
         self.sched_start = datetime.datetime(
@@ -166,6 +207,8 @@ class PeriodicArchiver(object):
         self.attempts = 0
         self.commit_schedule(fsname)
 
+        return self.sched_start, self.sched_start + SCHEDULE_STEP
+
     def get_schedule_file(self, fsname):
         """Simple way to resolve fsname into a schedule file name
 
@@ -177,7 +220,7 @@ class PeriodicArchiver(object):
         """
         return self.schedule_file % fsname
 
-    def get_schedule(self, fsname):
+    def load_schedule(self, fsname):
         """Reads schedule file and updates internal schedule state
 
         Args:
@@ -186,20 +229,24 @@ class PeriodicArchiver(object):
         Returns:
             tuple of datetime.datetime: Start and end times of the next interval
         """
-
         if not os.path.isfile(self.get_schedule_file(fsname)):
-            self.init_schedule(fsname)
+            return self.init_schedule(fsname)
 
+        self.sched_start, self.attempts = (None, None)
         with open(self.get_schedule_file(fsname), 'r') as sched_file:
             line = sched_file.readline()
+            try:
+                self.sched_start, self.attempts = line.split()[0:2]
+            except ValueError:
+                # invalid schedule file; initialize and re-try
+                return self.init_schedule(fsname)
 
-        self.sched_start, self.attempts = line.split()[0:2]
-        self.sched_start = datetime.datetime.fromtimestamp(int(self.sched_start))
-        self.attempts = int(self.attempts)
+            self.sched_start = datetime.datetime.fromtimestamp(int(self.sched_start))
+            self.attempts = int(self.attempts)
 
         # if schedule is ancient (e.g., because monitoring was paused), reset it
         if (datetime.datetime.now() - self.sched_start) > MAX_AGE:
-            self.init_schedule(fsname)
+            return self.init_schedule(fsname)
 
         return self.sched_start, self.sched_start + SCHEDULE_STEP
 
@@ -242,9 +289,11 @@ class PeriodicArchiver(object):
 
         Args:
             start (datetime.datetime): Begin retrieving and archiving data
-                starting at this time, inclusive
+                starting at this time, inclusive.  If not specified, use the
+                schedule file
             end (datetime.datetime): Stop retrieving and archiving data after
-                this time, exclusive
+                this time, exclusive.  If not specified, use the schedule
+                file
             fsname (str): file system whose config/schedule should be used
             output_file (str): File to which output should be written
 
@@ -260,12 +309,12 @@ class PeriodicArchiver(object):
         output_file = self.fsname_to_hdf5.get(fsname)
         if output_file is None:
             self.verror("Target file system %s is not in configuration file" % fsname)
-            self.verror("Valid file systems are: " " ".join(self.fsname_to_hdf5.keys()))
+            self.verror("Valid file systems are: " + ", ".join(self.fsname_to_hdf5.keys()))
             return
 
         # get schedule using fsname
         if self.use_schedule:
-            start, end = self.get_schedule(fsname)
+            start, end = self.load_schedule(fsname)
 
         # don't run schedules that include the future
         if start > datetime.datetime.now() or end > datetime.datetime.now():
@@ -292,11 +341,16 @@ class PeriodicArchiver(object):
 
         # actually create the output file at this point
         self.vprint("Archiving %s to %s" % (fsname, os.path.basename(output_file)))
-        ret = self.run_archiver(
-            start=start,
-            end=end,
-            fsname=fsname,
-            output_file=output_file)
+        try:
+            self.run_archiver(
+                start=start,
+                end=end,
+                fsname=fsname,
+                output_file=output_file)
+        except: # blind except to emulate behavior of running a subprocess
+            self.verror("Archiver raised an unhandled exception")
+            self.update_schedule(fsname, success=False)
+            raise
 
         # check for a total failure to create an output file
         if not os.path.isfile(output_file):
@@ -306,12 +360,6 @@ class PeriodicArchiver(object):
 
         # fix permissions if file created
         chmod(output_file, stat.S_IROTH|stat.S_IRGRP|stat.S_IWGRP)
-
-        # check for non-fatal errors
-        if ret != 0:
-            self.update_schedule(fsname, success=False)
-            self.verror("Archiver existed with code %d" % ret)
-            return
 
         # if we successfully archived an interval, update the schedule
         self.update_schedule(fsname, success=True)
@@ -335,9 +383,15 @@ def main(argv=None):
     parser.add_argument("fsname", type=str, default=None,
                         help="name of file system to archive")
     parser.add_argument("-s", "--start", type=str, default=None,
-                        help="start time of query in %s format" % DATE_FMT)
+                        help="start time of query in %s format (default: use schedule file)"
+                        % DATE_FMT_PRINT)
     parser.add_argument("-e", "--end", type=str,
-                        help="end time of query in %s format" % DATE_FMT)
+                        help="end time of query in %s format (default: use schedule file)"
+                        % DATE_FMT_PRINT)
+    parser.add_argument('-c', '--config', type=str, default=None,
+                        help="path to JSON configuration file")
+    parser.add_argument('-v', '--verbose', action='count', default=0,
+                        help="verbosity level (default: none)")
     args = parser.parse_args(argv)
 
     # convert CLI options into datetime
@@ -346,13 +400,16 @@ def main(argv=None):
             start = datetime.datetime.strptime(args.start, DATE_FMT)
             end = datetime.datetime.strptime(args.end, DATE_FMT)
         except ValueError:
-            sys.stderr.write("Start and end times must be in format %s\n" % DATE_FMT)
+            sys.stderr.write("Start and end times must be in format %s\n" % DATE_FMT_PRINT)
             raise
     else:
         start = None
         end = None
 
-    archiver = PeriodicArchiver(config=None)
+    archiver = PeriodicArchiver(
+        archiver_method=ARCHIVERS.get(args.fsname),
+        verbose=args.verbose,
+        config=args.config)
     archiver.archive(start=start, end=end, fsname=args.fsname)
 
 if __name__ == "__main__":
