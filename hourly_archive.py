@@ -13,7 +13,9 @@ import datetime
 
 import tokio
 import tokio.cli.archive_lmtdb
+import tokio.cli.archive_mmperfmon
 import tokio.cli.archive_collectdes
+import tokio.cli.archive_esnet_snmp
 
 SCHEDULE_FILE = "%s.schedulefile"
 ARCHIVERS = {
@@ -22,6 +24,10 @@ ARCHIVERS = {
     "scratch3": tokio.cli.archive_lmtdb.main,
     "cscratch": tokio.cli.archive_lmtdb.main,
     "coribb": tokio.cli.archive_collectdes.main,
+    "project2": tokio.cli.archive_mmperfmon.main,
+    "projecta": tokio.cli.archive_mmperfmon.main,
+    "projectb": tokio.cli.archive_mmperfmon.main,
+#   "esnet": tokio.cli.archive_esnet_snmp.main, # does not currently work; CLI interface doesn't support --init-start/--init-end
 }
 
 # Intervals that start over MAX_AGE seconds ago are discarded without being run
@@ -49,7 +55,10 @@ DEFAULT_CONFIG = {
         "cscratch": "snx11168.hdf5",
         "gscratch": "snx11169.hdf5",
         "coribb": "coribb.hdf5",
-        "esnet": "esnet_nersc.hdf5"
+        "esnet": "esnet_nersc.hdf5",
+        "project2": "project2.hdf5",
+        "projecta": "projecta.hdf5",
+        "projectb": "projectb.hdf5"
     },
     "archiver_args": {
         "scratch1": "--host edisonxa1.nersc.gov --timestep 5 --database filesystem_snx11025",
@@ -57,7 +66,10 @@ DEFAULT_CONFIG = {
         "scratch3": "--host edisonxa3.nersc.gov --timestep 5 --database filesystem_snx11036",
         "cscratch": "--host corifs01.nersc.gov --timestep 5 --database filesystem_snx11168",
         "gscratch": "--host gertfs01.nersc.gov --timestep 5 --database filesystem_snx11169",
-        "coribb": "--num-nodes 288 --ssds-per-node 4 --timestep 10 --timeout 300 --threads 4 --index cori-collectd-*"
+        "coribb": "--num-nodes 288 --ssds-per-node 4 --timestep 10 --timeout 300 --threads 4 --index cori-collectd-*",
+        "project2": "--filesystem project2",
+        "projecta": "--filesystem projecta",
+        "projectb": "--filesystem projectb",
     },
 }
 
@@ -99,6 +111,7 @@ class PeriodicArchiver(object):
         self.schedule_file = None
         self.sched_start = None
         self.attempts = None
+        self.max_attempts = None
 
         self.load_config(config=config)
 
@@ -109,7 +122,7 @@ class PeriodicArchiver(object):
             msg (str): Message to print to stdout
             level (int): Minimum verbosity level required to display msg
         """
-        if level >= self.verbosity:
+        if level <= self.verbosity:
             print(msg)
 
     def verror(self, msg):
@@ -205,6 +218,12 @@ class PeriodicArchiver(object):
             minute=0,
             second=0)
         self.attempts = 0
+
+        # because we set the start time to the top of the hour, it may push the
+        # start time into an invalid date, resulting in an endless loop of
+        # invalid dates
+        while (datetime.datetime.now() - self.sched_start) > MAX_AGE:
+            self.sched_start += datetime.timedelta(hours=1)
         self.commit_schedule(fsname)
 
         return self.sched_start, self.sched_start + SCHEDULE_STEP
@@ -234,18 +253,27 @@ class PeriodicArchiver(object):
 
         self.sched_start, self.attempts = (None, None)
         with open(self.get_schedule_file(fsname), 'r') as sched_file:
-            line = sched_file.readline()
-            try:
-                self.sched_start, self.attempts = line.split()[0:2]
-            except ValueError:
-                # invalid schedule file; initialize and re-try
-                return self.init_schedule(fsname)
+            for line in sched_file:
+                if line.lstrip().startswith('#'):
+                    continue
+                try:
+                    self.sched_start, self.attempts = line.split()[0:2]
+                    break
+                except ValueError:
+                    # invalid schedule file; initialize and re-try
+                    return self.init_schedule(fsname)
 
-            self.sched_start = datetime.datetime.fromtimestamp(int(self.sched_start))
-            self.attempts = int(self.attempts)
+        self.sched_start = datetime.datetime.fromtimestamp(int(self.sched_start))
+        self.attempts = int(self.attempts)
+
+        if self.max_attempts and self.attempts > self.max_attempts:
+            self.vprint("Exceeded max attempts (%d > %d); moving to new step" % (self.attempts, self.max_attempts))
+            self.sched_start += SCHEDULE_STEP
+            self.attempts = 0
 
         # if schedule is ancient (e.g., because monitoring was paused), reset it
         if (datetime.datetime.now() - self.sched_start) > MAX_AGE:
+            self.vprint("Dropping schedulefile due to age (%s)" % (datetime.datetime.now() - self.sched_start))
             return self.init_schedule(fsname)
 
         return self.sched_start, self.sched_start + SCHEDULE_STEP
@@ -281,9 +309,10 @@ class PeriodicArchiver(object):
             fsname (str): file system whose config/schedule should be used
         """
         with open(self.get_schedule_file(fsname), 'w') as sched_file:
+            sched_file.write("# start of next interval, number of failed attempts at this start time\n")
             sched_file.write("%d %d\n" % (tokio.common.to_epoch(self.sched_start), self.attempts))
 
-    def archive(self, start, end, fsname):
+    def archive(self, start, end, fsname, max_attempts=None):
         """Reads the schedule file, executes the archiver, and updates the
         schedule file.
 
@@ -298,6 +327,9 @@ class PeriodicArchiver(object):
             output_file (str): File to which output should be written
 
         """
+        if max_attempts:
+            self.max_attempts = max_attempts
+
         # specify start/stop date/time if we want to bypass the scheduler
         if start is not None:
             self.use_schedule = False
@@ -392,6 +424,8 @@ def main(argv=None):
                         help="path to JSON configuration file")
     parser.add_argument('-v', '--verbose', action='count', default=0,
                         help="verbosity level (default: none)")
+    parser.add_argument('-m', '--max-attempts', type=int, default=3,
+                        help="number of consecutive failures before skipping a time step (default: 3)")
     args = parser.parse_args(argv)
 
     # convert CLI options into datetime
@@ -410,7 +444,7 @@ def main(argv=None):
         archiver_method=ARCHIVERS.get(args.fsname),
         verbose=args.verbose,
         config=args.config)
-    archiver.archive(start=start, end=end, fsname=args.fsname)
+    archiver.archive(start=start, end=end, fsname=args.fsname, max_attempts=args.max_attempts)
 
 if __name__ == "__main__":
     main()
