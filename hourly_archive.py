@@ -31,8 +31,8 @@ ARCHIVERS = {
 }
 
 # Intervals that start over MAX_AGE seconds ago are discarded without being run
-MAX_AGE = datetime.timedelta(days=1)
-MAX_ATTEMPTS = 5
+MAX_AGE = 30
+MAX_ATTEMPTS = 2
 SCHEDULE_STEP = datetime.timedelta(hours=1) # archive this much time in one invocation
 FILE_INTERVAL = datetime.timedelta(days=1) # domain of each output file
 
@@ -97,7 +97,7 @@ class PeriodicArchiver(object):
         schedule_file (str): Path to a file to be used to record the last
             executed interval
     """
-    def __init__(self, archiver_method, config=None, verbose=1):
+    def __init__(self, archiver_method, config=None, verbose=1, max_attempts=None, max_age=30):
         self.archiver_method = archiver_method
         self.verbosity = verbose
 
@@ -111,7 +111,9 @@ class PeriodicArchiver(object):
         self.schedule_file = None
         self.sched_start = None
         self.attempts = None
-        self.max_attempts = None
+        self.max_attempts = max_attempts
+        self.max_age = datetime.timedelta(days=max_age)
+
 
         self.load_config(config=config)
 
@@ -209,7 +211,7 @@ class PeriodicArchiver(object):
             tuple of datetime.datetime: Start and end times of the interval just
             initialized
         """
-        self.sched_start = datetime.datetime.now() - MAX_AGE
+        self.sched_start = datetime.datetime.now() - self.max_age
         self.sched_start = datetime.datetime(
             year=self.sched_start.year,
             month=self.sched_start.month,
@@ -222,7 +224,7 @@ class PeriodicArchiver(object):
         # because we set the start time to the top of the hour, it may push the
         # start time into an invalid date, resulting in an endless loop of
         # invalid dates
-        while (datetime.datetime.now() - self.sched_start) > MAX_AGE:
+        while (datetime.datetime.now() - self.sched_start) > self.max_age:
             self.sched_start += datetime.timedelta(hours=1)
         self.commit_schedule(fsname)
 
@@ -266,13 +268,13 @@ class PeriodicArchiver(object):
         self.sched_start = datetime.datetime.fromtimestamp(int(self.sched_start))
         self.attempts = int(self.attempts)
 
-        if self.max_attempts and self.attempts > self.max_attempts:
-            self.vprint("Exceeded max attempts (%d > %d); moving to new step" % (self.attempts, self.max_attempts))
+        if self.max_attempts and self.attempts >= self.max_attempts:
+            self.vprint("Exceeded max attempts (%d >= %d); moving to new step" % (self.attempts, self.max_attempts))
             self.sched_start += SCHEDULE_STEP
             self.attempts = 0
 
         # if schedule is ancient (e.g., because monitoring was paused), reset it
-        if (datetime.datetime.now() - self.sched_start) > MAX_AGE:
+        if (datetime.datetime.now() - self.sched_start) > self.max_age:
             self.vprint("Dropping schedulefile due to age (%s)" % (datetime.datetime.now() - self.sched_start))
             return self.init_schedule(fsname)
 
@@ -327,9 +329,6 @@ class PeriodicArchiver(object):
             output_file (str): File to which output should be written
 
         """
-        if max_attempts:
-            self.max_attempts = max_attempts
-
         # specify start/stop date/time if we want to bypass the scheduler
         if start is not None:
             self.use_schedule = False
@@ -424,8 +423,10 @@ def main(argv=None):
                         help="path to JSON configuration file")
     parser.add_argument('-v', '--verbose', action='count', default=0,
                         help="verbosity level (default: none)")
-    parser.add_argument('-m', '--max-attempts', type=int, default=3,
-                        help="number of consecutive failures before skipping a time step (default: 3)")
+    parser.add_argument('--max-attempts', type=int, default=MAX_ATTEMPTS,
+                        help="number of consecutive failures before skipping a time step (default: %d)" % MAX_ATTEMPTS)
+    parser.add_argument('--max-age', type=int, default=MAX_AGE,
+                        help="ignore intervals more than this many days in the past (default: %d)" % MAX_AGE)
     args = parser.parse_args(argv)
 
     # convert CLI options into datetime
@@ -443,8 +444,10 @@ def main(argv=None):
     archiver = PeriodicArchiver(
         archiver_method=ARCHIVERS.get(args.fsname),
         verbose=args.verbose,
-        config=args.config)
-    archiver.archive(start=start, end=end, fsname=args.fsname, max_attempts=args.max_attempts)
+        config=args.config,
+        max_attempts=args.max_attempts,
+        max_age=args.max_age)
+    archiver.archive(start=start, end=end, fsname=args.fsname)
 
 if __name__ == "__main__":
     main()
