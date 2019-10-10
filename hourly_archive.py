@@ -328,6 +328,8 @@ class PeriodicArchiver(object):
             fsname (str): file system whose config/schedule should be used
             output_file (str): File to which output should be written
 
+        Returns:
+            int: 0 on success; -1 on unexpected error; 5 on deferral
         """
         # specify start/stop date/time if we want to bypass the scheduler
         if start is not None:
@@ -341,7 +343,7 @@ class PeriodicArchiver(object):
         if output_file is None:
             self.verror("Target file system %s is not in configuration file" % fsname)
             self.verror("Valid file systems are: " + ", ".join(self.fsname_to_hdf5.keys()))
-            return
+            return -1
 
         # get schedule using fsname
         if self.use_schedule:
@@ -351,7 +353,7 @@ class PeriodicArchiver(object):
         if start > datetime.datetime.now() or end > datetime.datetime.now():
             self.vprint("Next job for %s (%s to %s) is in the future; deferring"
                         % (fsname, start.strftime(DATE_FMT), end.strftime(DATE_FMT)))
-            return
+            return 5
         self.vprint("Executing schedule from %s to %s for %s"
                     % (start.strftime(DATE_FMT), end.strftime(DATE_FMT), fsname))
 
@@ -387,13 +389,15 @@ class PeriodicArchiver(object):
         if not os.path.isfile(output_file):
             self.verror("Failed to create %s" % output_file)
             self.update_schedule(fsname, success=False)
-            return
+            return -1
 
         # fix permissions if file created
         chmod(output_file, stat.S_IROTH|stat.S_IRGRP|stat.S_IWGRP)
 
         # if we successfully archived an interval, update the schedule
         self.update_schedule(fsname, success=True)
+
+        return 0
 
 def chmod(path, add_perms):
     """Wraps os.chmod to provide something equivalent to ``chmod +x``
@@ -447,7 +451,7 @@ def main(argv=None):
         config=args.config,
         max_attempts=args.max_attempts,
         max_age=args.max_age)
-    archiver.archive(start=start, end=end, fsname=args.fsname)
+    return archiver.archive(start=start, end=end, fsname=args.fsname)
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
