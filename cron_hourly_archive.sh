@@ -1,9 +1,10 @@
 #!/bin/bash -l
 ################################################################################
-#  Wrapper to call hourly_archive.py and track the history of data that has been
-#  already successfully archived.
+#  Wrapper to call hourly_archive.py, track errors, and send e-mail
+#  notifications when things are broken.  Intended to be called directly by
+#  cron.
 #
-#  Glenn K. Lockwood, July 2019            Lawrence Berkeley National Laboratory
+#  Glenn K. Lockwood, October 2019         Lawrence Berkeley National Laboratory
 ################################################################################
 
 BASE_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))"
