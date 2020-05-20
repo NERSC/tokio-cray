@@ -19,11 +19,11 @@ MAX_ERROR_FREQ=${MAX_ERROR_FREQ:-21600} # 21600 = six hours
 # LMT is broken as of October 8, 2019
 #${BASE_DIR}/hourly_archive.py cscratch | gawk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' > $LOGFILE 2>&1
 
-for fs in projecta projectb project2
+for fs in projecta projectb
 do
     LOGFILE="${LOGFILE_BASE}_${fs}_${RANDOM}"
 
-    ${BASE_DIR}/hourly_archive.py -v $fs 2>&1 | gawk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' > $LOGFILE
+    ${BASE_DIR}/hourly_archive.py --config ${BASE_DIR}/hourly_archive_config.json -v $fs 2>&1 | gawk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' > $LOGFILE
     ret=$?
 
     ### Append the log file to the global log
@@ -54,7 +54,7 @@ if [ ! -z "$ERRORS" ]; then
     # down for a few hours
     if [ $error_ago -gt $MAX_ERROR_FREQ ]; then
         # report an error
-        for logfile in $LOGFILE
+        for logfile in $ERRORS
         do
             echo "========================================"
             echo "$logfile"
