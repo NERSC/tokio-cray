@@ -3,6 +3,7 @@
 archive_lmtdb.log
 archive_collectdes.log
 schedule.*/
+*.schedulefile
 
 # do not track files containing secrets!
 siteconfig.sh
