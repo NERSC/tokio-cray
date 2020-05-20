@@ -1,0 +1,26 @@
+{
+    "admin_emails": [
+        "admin@mycenter.edu"
+    ],
+    "report_emails": [
+        "admin@mycenter.edu",
+        "userservices@mycenter.edu"
+    ],
+    "output_dir": "/path/to/daily/outputs",
+    "fsname_to_hdf5": {
+        "scratch1": "snx10001.hdf5",
+        "scratch2": "snx10002.hdf5",
+        "scratch3": "snx10003.hdf5",
+        "burstbuffer": "bb.hdf5",
+        "gpfs1": "gpfs1.hdf5",
+        "gpfs2": "gpfs2.hdf5"
+    },
+    "archiver_args": {
+        "scratch1": "--host dbserver1.mycenter.edu --timestep 5 --database filesystem_snx10001",
+        "scratch2": "--host dbserver2.mycenter.edu --timestep 5 --database filesystem_snx10002",
+        "scratch3": "--host dbserver3.mycenter.edu --timestep 5 --database filesystem_snx10003",
+        "burstbuffer": "--num-nodes 288 --ssds-per-node 4 --timestep 10 --timeout 300 --threads 4 --index bb-collectd-*",
+        "gpfs1": "--filesystem gpfs1",
+        "gpfs2": "--filesystem gpfs2"
+    }
+}
