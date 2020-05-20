@@ -27,13 +27,14 @@ ARCHIVERS = {
     "project2": tokio.cli.archive_mmperfmon.main,
     "projecta": tokio.cli.archive_mmperfmon.main,
     "projectb": tokio.cli.archive_mmperfmon.main,
+    "cfs": tokio.cli.archive_mmperfmon.main,
 #   "esnet": tokio.cli.archive_esnet_snmp.main, # does not currently work; CLI interface doesn't support --init-start/--init-end
 }
 
 # Intervals that start over MAX_AGE seconds ago are discarded without being run
 MAX_AGE = 30
 MAX_ATTEMPTS = 2
-SCHEDULE_STEP = datetime.timedelta(hours=1) # archive this much time in one invocation
+SCHEDULE_STEP = 3600 # archive this much time in one invocation
 FILE_INTERVAL = datetime.timedelta(days=1) # domain of each output file
 
 DATE_FMT = "%Y-%m-%dT%H:%M:%S"
@@ -85,6 +86,12 @@ class PeriodicArchiver(object):
             archiver_method
         verbose (int): Level of verbosity to use when executing an archival
             process
+        max_attempts (int): Number of consecutive failures before skipping the
+            current schedule step
+        schedule_file (str): Path to a file to be used to record the last
+            executed interval
+        schedule_step (datetime.timedelta): Amount of time that should be
+            archived in a single invocation of the archive() method
 
     Attributes:
         verbosity (int): Level of verbosity when executing
@@ -96,8 +103,11 @@ class PeriodicArchiver(object):
             rather than rely on the scheduler
         schedule_file (str): Path to a file to be used to record the last
             executed interval
+        schedule_step (datetime.timedelta): Amount of time that should be
+            archived in a single invocation of the archive() method
     """
-    def __init__(self, archiver_method, config=None, verbose=1, max_attempts=None, max_age=30):
+    def __init__(self, archiver_method, config=None, verbose=1,
+                 max_attempts=None, max_age=30, schedule_step=SCHEDULE_STEP):
         self.archiver_method = archiver_method
         self.verbosity = verbose
 
@@ -105,6 +115,7 @@ class PeriodicArchiver(object):
         self.output_base_dir = None
         self.archiver_args = None
         self.fsname_to_hdf5 = None
+        self.schedule_step = schedule_step
 
         # runtime parameters
         self.use_schedule = True
@@ -228,7 +239,7 @@ class PeriodicArchiver(object):
             self.sched_start += datetime.timedelta(hours=1)
         self.commit_schedule(fsname)
 
-        return self.sched_start, self.sched_start + SCHEDULE_STEP
+        return self.sched_start, self.sched_start + self.schedule_step
 
     def get_schedule_file(self, fsname):
         """Simple way to resolve fsname into a schedule file name
@@ -254,23 +265,32 @@ class PeriodicArchiver(object):
             return self.init_schedule(fsname)
 
         self.sched_start, self.attempts = (None, None)
+        _sched_start = None
         with open(self.get_schedule_file(fsname), 'r') as sched_file:
             for line in sched_file:
                 if line.lstrip().startswith('#'):
                     continue
                 try:
-                    self.sched_start, self.attempts = line.split()[0:2]
+                    _sched_start, self.attempts = line.split()[0:2]
                     break
                 except ValueError:
                     # invalid schedule file; initialize and re-try
                     return self.init_schedule(fsname)
 
-        self.sched_start = datetime.datetime.fromtimestamp(int(self.sched_start))
+        try:
+            self.sched_start = datetime.datetime.fromtimestamp(int(_sched_start))
+        except ValueError:
+            pass
+
+        # fall back to ISO 8601 format - good for manually hacking the schedule
+        if not self.sched_start:
+            self.sched_start = datetime.datetime.strptime(_sched_start, "%Y-%m-%dT%H:%M:%S")
+            
         self.attempts = int(self.attempts)
 
         if self.max_attempts and self.attempts >= self.max_attempts:
-            self.vprint("Exceeded max attempts (%d >= %d); moving to new step" % (self.attempts, self.max_attempts))
-            self.sched_start += SCHEDULE_STEP
+            self.vprint("Exceeded max attempts (%d >= %d) for %s; moving to new step" % (self.attempts, self.max_attempts, fsname))
+            self.sched_start += self.schedule_step
             self.attempts = 0
 
         # if schedule is ancient (e.g., because monitoring was paused), reset it
@@ -278,7 +298,7 @@ class PeriodicArchiver(object):
             self.vprint("Dropping schedulefile due to age (%s)" % (datetime.datetime.now() - self.sched_start))
             return self.init_schedule(fsname)
 
-        return self.sched_start, self.sched_start + SCHEDULE_STEP
+        return self.sched_start, self.sched_start + self.schedule_step
 
     def update_schedule(self, fsname, success):
         """Updates the schedule file with either a new starting interval or the
@@ -296,10 +316,11 @@ class PeriodicArchiver(object):
             raise RuntimeError("update_schedule called before get/init schedule")
 
         if success:
-            self.sched_start += SCHEDULE_STEP
+            self.sched_start += self.schedule_step
             self.attempts = 0
         else:
             self.attempts += 1
+            self.vprint("Logged failures for %s to %d" % (fsname, self.attempts))
             # self.sched_start remains unchanged
 
         self.commit_schedule(fsname)
@@ -431,6 +452,9 @@ def main(argv=None):
                         help="number of consecutive failures before skipping a time step (default: %d)" % MAX_ATTEMPTS)
     parser.add_argument('--max-age', type=int, default=MAX_AGE,
                         help="ignore intervals more than this many days in the past (default: %d)" % MAX_AGE)
+    parser.add_argument('--schedule-step', type=int, default=SCHEDULE_STEP,
+                        help="how many seconds of data should be pulled in one schedule step (default: %d)" % SCHEDULE_STEP)
+
     args = parser.parse_args(argv)
 
     # convert CLI options into datetime
@@ -450,7 +474,8 @@ def main(argv=None):
         verbose=args.verbose,
         config=args.config,
         max_attempts=args.max_attempts,
-        max_age=args.max_age)
+        max_age=args.max_age,
+        schedule_step=datetime.timedelta(seconds=args.schedule_step))
     return archiver.archive(start=start, end=end, fsname=args.fsname)
 
 if __name__ == "__main__":
