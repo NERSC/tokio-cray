@@ -19,11 +19,17 @@ MAX_ERROR_FREQ=${MAX_ERROR_FREQ:-21600} # 21600 = six hours
 # LMT is broken as of October 8, 2019
 #${BASE_DIR}/hourly_archive.py cscratch | gawk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' > $LOGFILE 2>&1
 
-for fs in projecta projectb cfs
+# MAX_ATTEMPTS = make sure that this is adjusted when cron frequency is changed
+#  if cron is dialed up too high, it may exceed --max-attempts before valid data
+#  appears!
+
+MAX_ATTEMPTS=10
+
+for fs in projectb cfs
 do
     LOGFILE="${LOGFILE_BASE}_${fs}_${RANDOM}"
 
-    ${BASE_DIR}/hourly_archive.py --config ${BASE_DIR}/hourly_archive_config.json -v $fs 2>&1 | gawk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' > $LOGFILE
+    ${BASE_DIR}/hourly_archive.py --config ${BASE_DIR}/hourly_archive_config.json --max-attempts ${MAX_ATTEMPTS} -v $fs 2>&1 | gawk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' > $LOGFILE
     ret=$?
 
     ### Append the log file to the global log
