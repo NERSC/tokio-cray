@@ -24,12 +24,14 @@ MAX_ERROR_FREQ=${MAX_ERROR_FREQ:-21600} # 21600 = six hours
 #  appears!
 
 MAX_ATTEMPTS=10
+MYSELF="$(basename ${BASH_SOURCE[0]})"
 
 for fs in projectb cfs
 do
     LOGFILE="${LOGFILE_BASE}_${fs}_${RANDOM}"
 
-    ${BASE_DIR}/hourly_archive.py --config ${BASE_DIR}/hourly_archive_config.json --max-attempts ${MAX_ATTEMPTS} -v $fs 2>&1 | gawk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' > $LOGFILE
+    echo "Executing [${BASE_DIR}/hourly_archive.py --config ${BASE_DIR}/hourly_archive_config.json --trail 21600 --max-attempts ${MAX_ATTEMPTS} -v $fs]" | gawk '{ print strftime("[%Y-%m-%d %H:%M:%S] '$MYSELF'"), $0 }' > "$LOGFILE"
+    ${BASE_DIR}/hourly_archive.py --config ${BASE_DIR}/hourly_archive_config.json --trail 21600 --max-attempts ${MAX_ATTEMPTS} -v $fs 2>&1 | gawk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' >> "$LOGFILE"
     ret=$?
 
     ### Append the log file to the global log
