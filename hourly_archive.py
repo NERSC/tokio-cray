@@ -92,6 +92,9 @@ class PeriodicArchiver(object):
             executed interval
         schedule_step (datetime.timedelta): Amount of time that should be
             archived in a single invocation of the archive() method
+        trail (datetime.timedelta): Amount of time relatively to now that
+                the schedule should be starting.  Useful if data is only
+                available an hour after it is generated
 
     Attributes:
         verbosity (int): Level of verbosity when executing
@@ -107,7 +110,8 @@ class PeriodicArchiver(object):
             archived in a single invocation of the archive() method
     """
     def __init__(self, archiver_method, config=None, verbose=1,
-                 max_attempts=None, max_age=30, schedule_step=SCHEDULE_STEP):
+                 max_attempts=None, max_age=30, schedule_step=SCHEDULE_STEP,
+                 trail=datetime.timedelta(seconds=0)):
         self.archiver_method = archiver_method
         self.verbosity = verbose
 
@@ -124,11 +128,11 @@ class PeriodicArchiver(object):
         self.attempts = None
         self.max_attempts = max_attempts
         self.max_age = datetime.timedelta(days=max_age)
-
+        self.trail = trail
 
         self.load_config(config=config)
 
-    def vprint(self, msg, level=1):
+    def vprint(self, msg, level=1, **kwargs):
         """Prints messages based on verbosity level
 
         Args:
@@ -136,7 +140,7 @@ class PeriodicArchiver(object):
             level (int): Minimum verbosity level required to display msg
         """
         if level <= self.verbosity:
-            print(msg)
+            print(msg, **kwargs)
 
     def verror(self, msg):
         """Prints error messages
@@ -200,7 +204,7 @@ class PeriodicArchiver(object):
 
         # call the archiver
         if self.archiver_method:
-            self.vprint("Calling archiver with args: %s" % " ".join(argv))
+            self.vprint("Calling archiver with args: %s" % " ".join(argv), flush=True)
             self.archiver_method(argv=argv)
         else:
             # unlock (though not usually necessary since process is about to die)
@@ -222,7 +226,8 @@ class PeriodicArchiver(object):
             tuple of datetime.datetime: Start and end times of the interval just
             initialized
         """
-        self.sched_start = datetime.datetime.now() - self.max_age
+
+        self.sched_start = datetime.datetime.now() - self.trail - self.max_age
         self.sched_start = datetime.datetime(
             year=self.sched_start.year,
             month=self.sched_start.month,
@@ -285,7 +290,7 @@ class PeriodicArchiver(object):
         # fall back to ISO 8601 format - good for manually hacking the schedule
         if not self.sched_start:
             self.sched_start = datetime.datetime.strptime(_sched_start, "%Y-%m-%dT%H:%M:%S")
-            
+
         self.attempts = int(self.attempts)
 
         if self.max_attempts and self.attempts >= self.max_attempts:
@@ -371,7 +376,8 @@ class PeriodicArchiver(object):
             start, end = self.load_schedule(fsname)
 
         # don't run schedules that include the future
-        if start > datetime.datetime.now() or end > datetime.datetime.now():
+        now = datetime.datetime.now() - self.trail
+        if start > now or end > now:
             self.vprint("Next job for %s (%s to %s) is in the future; deferring"
                         % (fsname, start.strftime(DATE_FMT), end.strftime(DATE_FMT)))
             return 5
@@ -454,6 +460,9 @@ def main(argv=None):
                         help="ignore intervals more than this many days in the past (default: %d)" % MAX_AGE)
     parser.add_argument('--schedule-step', type=int, default=SCHEDULE_STEP,
                         help="how many seconds of data should be pulled in one schedule step (default: %d)" % SCHEDULE_STEP)
+    parser.add_argument('--trail', type=int, default=0,
+                        help="how many seconds before now data is expected to be available (default: 0)")
+
 
     args = parser.parse_args(argv)
 
@@ -475,7 +484,8 @@ def main(argv=None):
         config=args.config,
         max_attempts=args.max_attempts,
         max_age=args.max_age,
-        schedule_step=datetime.timedelta(seconds=args.schedule_step))
+        schedule_step=datetime.timedelta(seconds=args.schedule_step),
+        trail=datetime.timedelta(seconds=args.trail))
     return archiver.archive(start=start, end=end, fsname=args.fsname)
 
 if __name__ == "__main__":
